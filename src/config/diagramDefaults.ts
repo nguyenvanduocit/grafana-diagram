@@ -23,7 +23,7 @@ export const defaultMermaidOptions: MermaidConfig = {
     diagramMarginY: 10, // - margin to the over and under the sequence diagram
     actorMargin: 50, // - Margin between actors
     width: 150, // - Width of actor boxes
-    height: 65, // - Height of actor boxes00000000001111
+    height: 65, // - Height of actor boxes
     boxMargin: 10, // - Margin around l01oop boxes
     boxTextMargin: 5, // - margin around the text in loop/alt/opt boxes
     noteMargin: 10, // - margin around notes

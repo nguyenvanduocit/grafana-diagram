@@ -5,9 +5,9 @@ import DiagramErrorBoundary from 'DiagramErrorBoundary';
 import { css } from '@emotion/css';
 import { merge } from 'lodash';
 import mermaid from 'mermaid';
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { updateDiagramStyle } from 'visualizers/updateDiagramStyle';
-import { DiagramOptions, DiagramSeriesModel, DiagramSeriesValue } from './config/types';
+import { DiagramOptions, DiagramSeriesModel, DiagramSeriesValue } from 'config/types';
 
 const mermaidAPI = mermaid.mermaidAPI;
 
@@ -25,13 +25,13 @@ export interface DiagramPanelControllerProps {
   onChangeTimeRange: (timeRange: AbsoluteTimeRange) => void;
 }
 
-interface DiagramPanelControllerState {
-  diagramContainer?: string;
-  wrapper?: string;
-  legendContainer?: string;
+interface DiagramStyles {
+  diagramContainer: string;
+  wrapper: string;
+  legendContainer: string;
 }
 
-const getDiagramWithLegendStyles = stylesFactory(({ options }: DiagramPanelControllerProps) => ({
+const getDiagramWithLegendStyles = stylesFactory(({ options }: DiagramPanelControllerProps): DiagramStyles => ({
   wrapper: css`
     display: flex;
     flex-direction: ${options.legend.placement === 'bottom' ? 'column' : 'row'};
@@ -47,130 +47,99 @@ const getDiagramWithLegendStyles = stylesFactory(({ options }: DiagramPanelContr
   `,
 }));
 
-export class DiagramPanelController extends React.Component<DiagramPanelControllerProps, DiagramPanelControllerState> {
-  diagramRef!: HTMLDivElement;
-  bindFunctions?: Function;
+export function DiagramPanelController(props: DiagramPanelControllerProps) {
+  const { theme, id, options, data, replaceVariables, onOptionsChange } = props;
+  const diagramRef = useRef<HTMLDivElement>(null);
 
-  constructor(props: DiagramPanelControllerProps) {
-    super(props);
-    this.onToggleSort = this.onToggleSort.bind(this);
-    this.setDiagramRef = this.setDiagramRef.bind(this);
-    this.renderCallback = this.renderCallback.bind(this);
-  }
+  const styles = useMemo(() => getDiagramWithLegendStyles(props), [props]);
 
-  static getDerivedStateFromProps(props: DiagramPanelControllerProps, state: DiagramPanelControllerState) {
-    const { diagramContainer, wrapper, legendContainer } = getDiagramWithLegendStyles(props);
-    if (!state) {
-      return {
-        diagramContainer,
-        wrapper,
-        legendContainer,
-      };
-    } else {
-      return null;
-    }
-  }
-
-  setDiagramRef(element: HTMLDivElement) {
-    this.diagramRef = element;
-  }
-
-  componentDidMount() {
-    this.initializeMermaid();
-  }
-
-  componentDidUpdate(prevProps: DiagramPanelControllerProps) {
-    if (
-      prevProps.options !== this.props.options ||
-      prevProps.fieldConfig !== this.props.fieldConfig ||
-      prevProps.theme !== this.props.theme ||
-      prevProps.data !== this.props.data
-    ) {
-      this.initializeMermaid();
-    }
-  }
-
-  contentProcessor(content: string): string {
-    const baseTheme = this.props.theme.isDark ? 'dark' : 'base';
+  const contentProcessor = useCallback((content: string): string => {
+    const baseTheme = theme.isDark ? 'dark' : 'base';
     // check if the diagram definition already contains an init block
-    const match = content.match('%%{.*}%%');
+    const match = content.match(/%%\{[\s\S]*?\}%%/);
     // if it does, just return the original content
     if (match && match.length > 0) {
       return content;
     } else {
       // otherwise inject the variables from the options
       let overrides;
-      if (this.props.theme.isDark) {
+      if (theme.isDark) {
         overrides = {
-          ...this.props.options.mermaidThemeVariablesDark.common,
-          ...this.props.options.mermaidThemeVariablesDark.classDiagram,
-          ...this.props.options.mermaidThemeVariablesDark.flowChart,
-          ...this.props.options.mermaidThemeVariablesDark.sequenceDiagram,
-          ...this.props.options.mermaidThemeVariablesDark.stateDiagram,
-          ...this.props.options.mermaidThemeVariablesDark.userJourneyDiagram,
+          ...options.mermaidThemeVariablesDark.common,
+          ...options.mermaidThemeVariablesDark.classDiagram,
+          ...options.mermaidThemeVariablesDark.flowChart,
+          ...options.mermaidThemeVariablesDark.sequenceDiagram,
+          ...options.mermaidThemeVariablesDark.stateDiagram,
+          ...options.mermaidThemeVariablesDark.userJourneyDiagram,
         };
       } else {
         overrides = {
-          ...this.props.options.mermaidThemeVariablesLight.common,
-          ...this.props.options.mermaidThemeVariablesLight.classDiagram,
-          ...this.props.options.mermaidThemeVariablesLight.flowChart,
-          ...this.props.options.mermaidThemeVariablesLight.sequenceDiagram,
-          ...this.props.options.mermaidThemeVariablesLight.stateDiagram,
-          ...this.props.options.mermaidThemeVariablesLight.userJourneyDiagram,
+          ...options.mermaidThemeVariablesLight.common,
+          ...options.mermaidThemeVariablesLight.classDiagram,
+          ...options.mermaidThemeVariablesLight.flowChart,
+          ...options.mermaidThemeVariablesLight.sequenceDiagram,
+          ...options.mermaidThemeVariablesLight.stateDiagram,
+          ...options.mermaidThemeVariablesLight.userJourneyDiagram,
         };
       }
 
       const customTheme = `%%{init: {'theme': '${baseTheme}', 'themeVariables': ${JSON.stringify(overrides)}}}%%\n`;
       return customTheme + content;
     }
-  }
+  }, [theme, options]);
 
-  async getRemoteDiagramDefinition(url: string) {
-    const response = await fetch(this.props.replaceVariables(url));
-    return await response.text();
-  }
-
-  loadDiagramDefinition() {
-    if (this.props.options.contentUrl) {
-      return this.getRemoteDiagramDefinition(this.props.options.contentUrl);
-    } else {
-      return Promise.resolve(this.props.options.content);
+  const getRemoteDiagramDefinition = useCallback(async (url: string): Promise<string> => {
+    const response = await fetch(replaceVariables(url));
+    if (!response.ok) {
+      throw new Error(`Failed to fetch diagram definition: ${response.status} ${response.statusText}`);
     }
-  }
+    return await response.text();
+  }, [replaceVariables]);
 
-  async initializeMermaid() {
-    const options = merge({}, defaultMermaidOptions, { theme: this.props.theme.isDark ? 'dark' : 'base' });
-    mermaid.initialize(options);
-  
-    if (this.diagramRef) {
-      const diagramDefinition = await this.loadDiagramDefinition();
+  const loadDiagramDefinition = useCallback((): Promise<string> => {
+    if (options.contentUrl) {
+      return getRemoteDiagramDefinition(options.contentUrl);
+    } else {
+      return Promise.resolve(options.content);
+    }
+  }, [options.contentUrl, options.content, getRemoteDiagramDefinition]);
+
+  const initializeMermaid = useCallback(async () => {
+    const mermaidOptions = merge({}, defaultMermaidOptions, { theme: theme.isDark ? 'dark' : 'base' });
+    mermaid.initialize(mermaidOptions);
+
+    if (diagramRef.current) {
+      const diagramDefinition = await loadDiagramDefinition();
       try {
-        const diagramId = `diagram-${this.props.id}`;
-        const interpolated = this.props.replaceVariables(this.contentProcessor(diagramDefinition));
-  
+        const diagramId = `diagram-${id}`;
+        const interpolated = replaceVariables(contentProcessor(diagramDefinition));
+
         try {
           const { svg, bindFunctions } = await mermaidAPI.render(diagramId, interpolated);
-          this.diagramRef.innerHTML = svg;
+          diagramRef.current.innerHTML = svg;
           if (bindFunctions) {
-            bindFunctions(this.diagramRef);
+            bindFunctions(diagramRef.current);
           }
         } catch (err) {
           //console.log("Trying to apply the default theme: ", err);
           const { svg, bindFunctions } = await mermaidAPI.render(diagramId, diagramDefinition);
-          this.diagramRef.innerHTML = svg;
+          diagramRef.current.innerHTML = svg;
           if (bindFunctions) {
-            bindFunctions(this.diagramRef);
+            bindFunctions(diagramRef.current);
           }
         }
-        updateDiagramStyle(this.diagramRef, this.props.data, this.props.options, diagramId);
+        updateDiagramStyle(diagramRef.current, data, options, diagramId);
       } catch (err) {
-        this.diagramRef.innerHTML = `<div><p>Error rendering diagram. Check the diagram definition</p><p>${err}</p></div>`;
+        diagramRef.current.innerHTML = `<div><p>Error rendering diagram. Check the diagram definition</p><p>${err}</p></div>`;
       }
     }
-  }
+  }, [theme, id, data, options, replaceVariables, contentProcessor, loadDiagramDefinition]);
 
-  onToggleSort(sortBy: string) {
-    const { onOptionsChange, options } = this.props;
+  useEffect(() => {
+    initializeMermaid();
+  }, [initializeMermaid]);
+
+  const onToggleSort = useCallback((sortBy: string) => {
     onOptionsChange({
       ...options,
       legend: {
@@ -179,31 +148,18 @@ export class DiagramPanelController extends React.Component<DiagramPanelControll
         sortDesc: sortBy === options.legend.sortBy ? !options.legend.sortDesc : false,
       },
     });
-  }
+  }, [onOptionsChange, options]);
 
-  renderCallback(svgCode: string, bindFunctions: any) {
-    if (this && bindFunctions) {
-      //console.log('binding diagram functions');
-      this.bindFunctions = bindFunctions;
-    }
-  }
-
-  legendStyles: React.CSSProperties = {
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
-  };
-
-  shouldHideLegendItem = (data: DiagramSeriesValue[][], hideEmpty = false, hideZero = false) => {
-    const isZeroOnlySeries = data.reduce((acc, current) => acc + (current[1] || 0), 0) === 0;
-    const isNullOnlySeries = !data.reduce((acc, current) => acc && current[1] !== null, true);
+  const shouldHideLegendItem = useCallback((seriesData: DiagramSeriesValue[][], hideEmpty = false, hideZero = false) => {
+    const isZeroOnlySeries = seriesData.reduce((acc, current) => acc + (current[1] || 0), 0) === 0;
+    const isNullOnlySeries = !seriesData.reduce((acc, current) => acc && current[1] !== null, true);
 
     return (hideEmpty && isNullOnlySeries) || (hideZero && isZeroOnlySeries);
-  };
+  }, []);
 
-  getLegendItems = () => {
-    return this.props.data.reduce<VizLegendItem[]>((acc, s) => {
-      return this.shouldHideLegendItem(s.data, this.props.options.legend.hideEmpty, this.props.options.legend.hideZero)
+  const getLegendItems = useCallback((): VizLegendItem[] => {
+    return data.reduce<VizLegendItem[]>((acc, s) => {
+      return shouldHideLegendItem(s.data, options.legend.hideEmpty, options.legend.hideZero)
         ? acc
         : acc.concat([
             {
@@ -217,33 +173,31 @@ export class DiagramPanelController extends React.Component<DiagramPanelControll
             },
           ]);
     }, []);
-  };
+  }, [data, options.legend.hideEmpty, options.legend.hideZero, shouldHideLegendItem]);
 
-  render() {
-    return (
-      <div className={`diagram-container diagram-container-${this.props.id}` && this.state.wrapper}>
-        <div
-          ref={this.setDiagramRef}
-          className={`diagram diagram-${this.props.id}` && this.state.diagramContainer}
-        ></div>
-        {this.props.options.legend.show && (
-          <div className={this.state.legendContainer}>
-            <CustomScrollbar hideHorizontalTrack>
-              <DiagramErrorBoundary fallback="Error rendering Legend">
-                <VizLegend
-                  items={this.getLegendItems()}
-                  displayMode={this.props.options.legend.displayMode}
-                  placement={this.props.options.legend.placement}
-                  sortBy={this.props.options.legend.sortBy}
-                  sortDesc={this.props.options.legend.sortDesc}
-                  onLabelClick={(item, event) => {}}
-                  onToggleSort={this.onToggleSort}
-                />
-              </DiagramErrorBoundary>
-            </CustomScrollbar>
-          </div>
-        )}
-      </div>
-    );
-  }
+  return (
+    <div className={`diagram-container diagram-container-${id} ${styles.wrapper}`}>
+      <div
+        ref={diagramRef}
+        className={`diagram diagram-${id} ${styles.diagramContainer}`}
+      ></div>
+      {options.legend.show && (
+        <div className={styles.legendContainer}>
+          <CustomScrollbar hideHorizontalTrack>
+            <DiagramErrorBoundary fallback="Error rendering Legend">
+              <VizLegend
+                items={getLegendItems()}
+                displayMode={options.legend.displayMode}
+                placement={options.legend.placement}
+                sortBy={options.legend.sortBy}
+                sortDesc={options.legend.sortDesc}
+                onLabelClick={(item, event) => {}}
+                onToggleSort={onToggleSort}
+              />
+            </DiagramErrorBoundary>
+          </CustomScrollbar>
+        </div>
+      )}
+    </div>
+  );
 }

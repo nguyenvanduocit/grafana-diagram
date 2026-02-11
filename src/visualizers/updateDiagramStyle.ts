@@ -1,7 +1,7 @@
 import { DisplayValue, formattedValueToString, LinkModel } from '@grafana/data';
 import { select, Selection } from 'd3';
 import { diagramStyleFormatter } from 'diagramStyleFormatter';
-import { CompositeMetric, DiagramOptions, DiagramSeriesModel, NodeSizeOptions } from '../config/types';
+import { CompositeMetric, DiagramOptions, DiagramSeriesModel, NodeSizeOptions } from 'config/types';
 
 type MetricIndicator = DisplayValue & {
   metricName: string;
@@ -11,11 +11,14 @@ type MetricIndicator = DisplayValue & {
   links?: LinkModel[];
 };
 
-const selectElementById = (container: HTMLElement, id: string): Selection<any, any, any, any> => {
+// D3 Selection type - using any for flexibility with D3's complex type system
+type D3Selection = Selection<any, any, any, any>;
+
+const selectElementById = (container: HTMLElement, id: string): D3Selection => {
   return select(container.querySelector(`[data-id="${id}"]`));
 };
 
-const selectElementByEdgeLabel = (container: HTMLElement, id: string): Selection<any, any, any, any> => {
+const selectElementByEdgeLabel = (container: HTMLElement, id: string): D3Selection => {
   return select(container)
     .selectAll('span')
     .filter(function () {
@@ -23,7 +26,7 @@ const selectElementByEdgeLabel = (container: HTMLElement, id: string): Selection
     });
 };
 
-const selectDivElementByAlias = (container: HTMLElement, alias: string): Selection<any, any, any, any> => {
+const selectDivElementByAlias = (container: HTMLElement, alias: string): D3Selection => {
   const targetElement = select(container)
     .selectAll('div')
     .filter(function () {
@@ -39,7 +42,7 @@ const selectDivElementByAlias = (container: HTMLElement, alias: string): Selecti
   return select(null);
 };
 
-const selectTextElementByAlias = (container: HTMLElement, alias: string): Selection<any, any, any, any> => {
+const selectTextElementByAlias = (container: HTMLElement, alias: string): D3Selection => {
   return select(container)
     .selectAll('text')
     .filter(function () {
@@ -47,7 +50,7 @@ const selectTextElementByAlias = (container: HTMLElement, alias: string): Select
     });
 };
 
-const selectTextElementContainingAlias = (container: HTMLElement, alias: string): Selection<any, any, any, any> => {
+const selectTextElementContainingAlias = (container: HTMLElement, alias: string): D3Selection => {
   return select(container)
     .selectAll('text')
     .filter(function () {
@@ -55,7 +58,7 @@ const selectTextElementContainingAlias = (container: HTMLElement, alias: string)
     });
 };
 
-const fetchParentsUntilShapeElementFound = (element: HTMLElement, selector: string): HTMLElement | null => {  
+const fetchParentsUntilShapeElementFound = (element: HTMLElement, selector: string): HTMLElement | null => {
   if (element.matches(selector)) {
     return element;
   }
@@ -65,7 +68,7 @@ const fetchParentsUntilShapeElementFound = (element: HTMLElement, selector: stri
   return null;
 }
 
-const resizeGrouping = (element: Selection<any, any, any, any> | null | undefined, nodeSize: NodeSizeOptions) => {
+const resizeGrouping = (element: D3Selection | null | undefined, nodeSize: NodeSizeOptions) => {
   if (!element) {
     return;
   }
@@ -90,7 +93,7 @@ const resizeGrouping = (element: Selection<any, any, any, any> | null | undefine
 };
 
 const styleD3Shapes = (
-  targetElement: Selection<any, any, any, any>,
+  targetElement: D3Selection,
   indicator: MetricIndicator,
   useBackground: boolean,
   nodeSize: NodeSizeOptions
@@ -119,11 +122,11 @@ const styleD3Shapes = (
 };
 
 const styleFlowChartEdgeLabel = (
-  targetElement: Selection<any, any, any, any>,
+  targetElement: D3Selection,
   indicator: MetricIndicator,
   useBackground: boolean,
   nodeSize: NodeSizeOptions
-) => {  
+) => {
   const edgeParent = select(targetElement.node().parentNode);
   edgeParent.append('br');
   const v = edgeParent.append('span');
@@ -142,25 +145,28 @@ const styleFlowChartEdgeLabel = (
 };
 
 const styleTextEdgeLabel = (
-  targetElement: Selection<any, any, any, any>,
+  targetElement: D3Selection,
   indicator: MetricIndicator,
   useBackground: boolean
 ) => {
-  targetElement.each((el) => {
+  targetElement.each((el: SVGGraphicsElement) => {
+    // Cache DOM measurement to avoid repeated getBBox() calls
+    const bbox = el.getBBox();
     let markerBox = {
-      x: el.getBBox().x,
-      y: el.getBBox().y + el.getBBox().height + 10,
-      width: el.getBBox().width,
-      height: el.getBBox().height,
+      x: bbox.x,
+      y: bbox.y + bbox.height + 10,
+      width: bbox.width,
+      height: bbox.height,
     };
     if (indicator.color) {
-      const rect = select(el.parentNode)
+      const parentNode = el.parentNode as HTMLElement;
+      const rect = select(parentNode)
         .insert('rect')
         .attr('x', markerBox.x)
         .attr('y', markerBox.y)
         .attr('width', markerBox.width)
         .attr('height', markerBox.height);
-      const textNode = select(el.parentNode)
+      const textNode = select(parentNode)
         .insert('text')
         .text(formattedValueToString(indicator))
         .attr('x', markerBox.x + markerBox.width / 2)
@@ -180,7 +186,7 @@ const styleTextEdgeLabel = (
 };
 
 const styleSequenceDiagramEdgeLabel = (
-  targetElement: Selection<any, any, any, any>,
+  targetElement: D3Selection,
   indicator: MetricIndicator,
   useBackground: boolean,
   nodeSize: NodeSizeOptions
@@ -248,8 +254,9 @@ const reduceComposites = (indicators: MetricIndicator[], composites: CompositeMe
       });
       if (candidates.length > 0) {
         const compositeIndicator = candidates.reduce((prev, current) => {
-          const previousValue = isNaN(prev.numeric) ? 0 : prev.numeric;
-          const currentValue = isNaN(current.numeric) ? 0 : current.numeric;
+          // Use Number.isNaN instead of isNaN for strict checking
+          const previousValue = Number.isNaN(prev.numeric) ? 0 : prev.numeric;
+          const currentValue = Number.isNaN(current.numeric) ? 0 : current.numeric;
           const currentIsLower = currentValue < previousValue;
           if (c.showLowestValue) {
             return currentIsLower ? current : prev;
@@ -265,7 +272,7 @@ const reduceComposites = (indicators: MetricIndicator[], composites: CompositeMe
         return null;
       }
     })
-    .filter((c) => c != null) as any;
+    .filter((c): c is MetricIndicator => c != null);
 };
 
 const reduceModels = (models: DiagramSeriesModel[]): MetricIndicator[] => {
@@ -282,7 +289,7 @@ const reduceModels = (models: DiagramSeriesModel[]): MetricIndicator[] => {
         valueName: dv.title,
       };
     })
-    .filter((m) => m != null) as any;
+    .filter((m): m is MetricIndicator => m != null);
 };
 
 export const updateDiagramStyle = (
